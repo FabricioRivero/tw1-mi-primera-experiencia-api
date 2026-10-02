@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { CreateEmpresaDto } from './dto/create-empresa.dto';
-import { UpdateEmpresaDto } from './dto/update-empresa.dto';
+import { CreateEmpresaDto } from './dto/crear-empresa.dto';
+import { UpdateEmpresaDto } from './dto/actualizar-empresa.dto';
 
 @Injectable()
 export class EmpresasService {
