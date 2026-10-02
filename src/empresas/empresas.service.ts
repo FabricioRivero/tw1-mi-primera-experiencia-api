@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { CreateEmpresaDto } from './dto/crear-empresa.dto';
-import { UpdateEmpresaDto } from './dto/actualizar-empresa.dto';
+import { CrearEmpresaDto } from './dto/crear-empresa.dto';
+import { ActualizarEmpresaDto } from './dto/actualizar-empresa.dto';
 
 @Injectable()
 export class EmpresasService {
-  create(createEmpresaDto: CreateEmpresaDto) {
+  create(createEmpresaDto: CrearEmpresaDto) {
     return 'This action adds a new empresa';
   }
 
@@ -16,7 +16,7 @@ export class EmpresasService {
     return `This action returns a #${id} empresa`;
   }
 
-  update(id: number, updateEmpresaDto: UpdateEmpresaDto) {
+  update(id: number, updateEmpresaDto: ActualizarEmpresaDto) {
     return `This action updates a #${id} empresa`;
   }
 
