@@ -1,61 +1,143 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { Estudiante } from './interfaces/estudiante.interface';
-import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
-import { ActualizarEstudianteDto } from './dto/actualizar-estudiante.dto';
+import { Estudiante } from './interfaces/estudiante.interface.js';
+import { CrearEstudianteDto } from './dto/crear-estudiante.dto.js';
+import { ActualizarEstudianteDto } from './dto/actualizar-estudiante.dto.js';
+import { ReemplazarEstudianteDto } from './dto/reemplazar-estudiante.dto.js';
 
 @Injectable()
 export class EstudiantesService {
   private readonly ruta = path.resolve(process.cwd(), 'data', 'estudiantes.json');
 
-  private leer(): Estudiante[] {
-    const contenido = fs.readFileSync(this.ruta, 'utf-8');
-    return JSON.parse(contenido);
+  private asegurarArchivo(): void {
+    const dir = path.dirname(this.ruta);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    if (!fs.existsSync(this.ruta)) {
+      fs.writeFileSync(this.ruta, '[]', 'utf-8');
+    }
   }
 
-  private guardar(datos: Estudiante[]) {
+  private leer(): Estudiante[] {
+    this.asegurarArchivo();
+    const contenido = fs.readFileSync(this.ruta, 'utf-8');
+    return JSON.parse(contenido) as Estudiante[];
+  }
+
+  private guardar(datos: Estudiante[]): void {
+    this.asegurarArchivo();
     fs.writeFileSync(this.ruta, JSON.stringify(datos, null, 2), 'utf-8');
   }
 
-  findAll(): Estudiante[] {
+  private buscarIndice(id: string): number {
+    const estudiantes = this.leer();
+    const indice = estudiantes.findIndex((item) => item.id === id);
+    if (indice === -1) {
+      throw new NotFoundException(`No existe un estudiante con id ${id}`);
+    }
+    return indice;
+  }
+
+  obtenerTodos(): Estudiante[] {
     return this.leer();
   }
 
-  findOne(id: string): Estudiante {
-    const estudiante = this.leer().find(e => e.id === id);
-    if (!estudiante) throw new NotFoundException(`Estudiante ${id} no encontrado`);
+  obtenerPorId(id: string): Estudiante {
+    const estudiante = this.leer().find((item) => item.id === id);
+    if (!estudiante) {
+      throw new NotFoundException(`No existe un estudiante con id ${id}`);
+    }
     return estudiante;
   }
 
-  create(dto: CrearEstudianteDto): Estudiante {
+  crear(datos: CrearEstudianteDto): Estudiante {
     const estudiantes = this.leer();
-    if (estudiantes.some(e => e.correo === dto.correo)) {
-      throw new BadRequestException('El correo ya existe');
+
+    if (estudiantes.some((item) => item.correo === datos.correo)) {
+      throw new ConflictException(
+        `Ya existe un estudiante registrado con el correo ${datos.correo}`,
+      );
     }
-    const nuevo = { id: uuidv4(), ...dto };
-    estudiantes.push(nuevo);
+
+    const nuevoEstudiante: Estudiante = {
+      id: uuidv4(),
+      nombre: datos.nombre,
+      universidad: datos.universidad,
+      carrera: datos.carrera,
+      semestreEgreso: datos.semestreEgreso,
+      correo: datos.correo,
+      telefono: datos.telefono,
+    };
+
+    estudiantes.push(nuevoEstudiante);
     this.guardar(estudiantes);
-    return nuevo;
+    return nuevoEstudiante;
   }
 
-  update(id: string, dto: ActualizarEstudianteDto): Estudiante {
+  reemplazar(id: string, datos: ReemplazarEstudianteDto): Estudiante {
     const estudiantes = this.leer();
-    const index = estudiantes.findIndex(e => e.id === id);
-    if (index === -1) throw new NotFoundException('No encontrado');
-    
-    estudiantes[index] = { ...estudiantes[index], ...dto };
+    const indice = this.buscarIndice(id);
+
+    const correoEnUso = estudiantes.some(
+      (item) => item.correo === datos.correo && item.id !== id,
+    );
+    if (correoEnUso) {
+      throw new ConflictException(
+        `Ya existe un estudiante registrado con el correo ${datos.correo}`,
+      );
+    }
+
+    const estudianteReemplazado: Estudiante = {
+      id,
+      nombre: datos.nombre,
+      universidad: datos.universidad,
+      carrera: datos.carrera,
+      semestreEgreso: datos.semestreEgreso,
+      correo: datos.correo,
+      telefono: datos.telefono,
+    };
+
+    estudiantes[indice] = estudianteReemplazado;
     this.guardar(estudiantes);
-    return estudiantes[index];
+    return estudianteReemplazado;
   }
 
-  remove(id: string) {
-    let estudiantes = this.leer();
-    const inicial = estudiantes.length;
-    estudiantes = estudiantes.filter(e => e.id !== id);
-    if (estudiantes.length === inicial) throw new NotFoundException('No encontrado');
+  actualizar(id: string, datos: ActualizarEstudianteDto): Estudiante {
+    const estudiantes = this.leer();
+    const indice = this.buscarIndice(id);
+
+    if (datos.correo) {
+      const correoEnUso = estudiantes.some(
+        (item) => item.correo === datos.correo && item.id !== id,
+      );
+      if (correoEnUso) {
+        throw new ConflictException(
+          `Ya existe un estudiante registrado con el correo ${datos.correo}`,
+        );
+      }
+    }
+
+    estudiantes[indice] = {
+      ...estudiantes[indice],
+      ...datos,
+    };
+
     this.guardar(estudiantes);
-    return { mensaje: 'Eliminado' };
+    return estudiantes[indice];
+  }
+
+  eliminar(id: string): Estudiante {
+    const estudiantes = this.leer();
+    const indice = this.buscarIndice(id);
+    const [estudianteEliminado] = estudiantes.splice(indice, 1);
+    this.guardar(estudiantes);
+    return estudianteEliminado;
   }
 }

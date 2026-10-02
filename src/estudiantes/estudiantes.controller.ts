@@ -1,15 +1,55 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { EstudiantesService } from './estudiantes.service';
-import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
-import { ActualizarEstudianteDto } from './dto/actualizar-estudiante.dto';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
+import { EstudiantesService } from './estudiantes.service.js';
+import { CrearEstudianteDto } from './dto/crear-estudiante.dto.js';
+import { ActualizarEstudianteDto } from './dto/actualizar-estudiante.dto.js';
+import { ReemplazarEstudianteDto } from './dto/reemplazar-estudiante.dto.js';
 
 @Controller('estudiantes')
 export class EstudiantesController {
-  constructor(private readonly service: EstudiantesService) {}
+  constructor(private readonly estudiantesService: EstudiantesService) {}
 
-  @Post() create(@Body() dto: CrearEstudianteDto) { return this.service.create(dto); }
-  @Get() findAll() { return this.service.findAll(); }
-  @Get(':id') findOne(@Param('id') id: string) { return this.service.findOne(id); }
-  @Patch(':id') update(@Param('id') id: string, @Body() dto: ActualizarEstudianteDto) { return this.service.update(id, dto); }
-  @Delete(':id') remove(@Param('id') id: string) { return this.service.remove(id); }
+  @Get()
+  obtenerTodos() {
+    return this.estudiantesService.obtenerTodos();
+  }
+
+  @Get(':id')
+  obtenerPorId(@Param('id') id: string) {
+    return this.estudiantesService.obtenerPorId(id);
+  }
+
+  @Post()
+  crear(@Body() datos: CrearEstudianteDto) {
+    return this.estudiantesService.crear(datos);
+  }
+
+  @Put(':id')
+  reemplazar(
+    @Param('id') id: string,
+    @Body() datos: ReemplazarEstudianteDto,
+  ) {
+    return this.estudiantesService.reemplazar(id, datos);
+  }
+
+  @Patch(':id')
+  actualizar(
+    @Param('id') id: string,
+    @Body() datos: ActualizarEstudianteDto,
+  ) {
+    return this.estudiantesService.actualizar(id, datos);
+  }
+
+  @Delete(':id')
+  eliminar(@Param('id') id: string) {
+    return this.estudiantesService.eliminar(id);
+  }
 }

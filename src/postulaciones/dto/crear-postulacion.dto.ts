@@ -1,6 +1,11 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
 
 export class CrearPostulacionDto {
-  @IsString() @IsNotEmpty() idEstudiante: string;
-  @IsString() @IsNotEmpty() idOferta: string;
+  @IsUUID()
+  @IsNotEmpty()
+  idEstudiante: string;
+
+  @IsString()
+  @IsNotEmpty()
+  idOferta: string;
 }
