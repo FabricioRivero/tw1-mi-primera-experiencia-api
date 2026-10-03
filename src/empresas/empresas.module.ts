@@ -5,5 +5,6 @@ import { EmpresasController } from './empresas.controller';
 @Module({
   controllers: [EmpresasController],
   providers: [EmpresasService],
+  exports: [EmpresasService], // para que OfertasModule pueda usarlo
 })
 export class EmpresasModule {}
