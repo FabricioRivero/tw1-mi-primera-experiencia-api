@@ -1,34 +1,61 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { OfertasService } from './ofertas.service';
-import { CreateOfertaDto } from './dto/crear-oferta.dto';
-import { UpdateOfertaDto } from './dto/actualizar-oferta.dto';
+import { CrearOfertaDto } from './dto/crear-oferta.dto';
+import { ReemplazarOfertaDto } from './dto/reemplazar-oferta.dto';
+import { ActualizarOfertaDto } from './dto/actualizar-oferta.dto';
+import { FiltrarOfertasDto } from './dto/filtrar-ofertas.dto';
 
 @Controller('ofertas')
 export class OfertasController {
   constructor(private readonly ofertasService: OfertasService) {}
 
   @Post()
-  create(@Body() createOfertaDto: CreateOfertaDto) {
-    return this.ofertasService.create(createOfertaDto);
+  create(@Body() dto: CrearOfertaDto) {
+    return this.ofertasService.create(dto);
   }
 
   @Get()
-  findAll() {
-    return this.ofertasService.findAll();
+  findAll(@Query() filtros: FiltrarOfertasDto) {
+    return this.ofertasService.findAll(filtros);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.ofertasService.findOne(+id);
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.ofertasService.findOne(id);
+  }
+
+  @Put(':id')
+  replace(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReemplazarOfertaDto,
+  ) {
+    return this.ofertasService.replace(id, dto);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateOfertaDto: UpdateOfertaDto) {
-    return this.ofertasService.update(+id, updateOfertaDto);
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ActualizarOfertaDto,
+  ) {
+    return this.ofertasService.update(id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.ofertasService.remove(+id);
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    this.ofertasService.remove(id);
   }
 }
