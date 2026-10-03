@@ -1,4 +1,4 @@
 export enum TipoOferta {
-  PASANTIA = 'pasantia',
-  EMPLEO = 'empleo',
+  PASANTIA = 'PASANTIA',
+  EMPLEO = 'EMPLEO',
 }

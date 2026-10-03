@@ -1,4 +1,4 @@
 export enum Modalidad {
-  PRESENCIAL = 'presencial',
-  VIRTUAL = 'virtual',
+  PRESENCIAL = 'PRESENCIAL',
+  VIRTUAL = 'VIRTUAL',
 }

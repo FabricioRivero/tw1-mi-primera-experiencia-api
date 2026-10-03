@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "id": "03104229-0c90-4860-b61a-0161b5df1bb3",
+    "nombre": "Jorge Alejandro Rissiotti",
+    "universidad": "UCB",
+    "carrera": "Ingeniería de Sistemas",
+    "semestreEgreso": "9",
+    "correo": "jorge@ucb.edu.bo",
+    "telefono": "70054321"
+  },
+  {
+    "id": "2bc833b7-98ac-4617-9df6-4971bba5caa7",
+    "nombre": "María López",
+    "universidad": "USFX",
+    "carrera": "Ingeniería de Sistemas",
+    "semestreEgreso": "10",
+    "correo": "maria.lopez@usfx.edu.bo",
+    "telefono": "70333444"
+  }
+]

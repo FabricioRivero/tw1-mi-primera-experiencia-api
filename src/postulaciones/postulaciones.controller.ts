@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -54,7 +56,8 @@ export class PostulacionesController {
   }
 
   @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
   eliminar(@Param('id') id: string) {
-    return this.postulacionesService.eliminar(id);
+    this.postulacionesService.eliminar(id);
   }
 }
