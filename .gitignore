@@ -1,10 +1,7 @@
-node_modules/
-dist/
-*.tsbuildinfo
-coverage/
+node_modules
+dist
+coverage
 .env
-.env.local
-npm-debug.log*
-.vscode/
-.idea/
+src/generated/prisma
+*.tsbuildinfo
 .DS_Store

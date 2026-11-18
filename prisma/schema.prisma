@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Usuario {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique @db.VarChar(254)
+  passwordHash String   @db.VarChar(255)
+  createdAt    DateTime @default(now())
+  rolId        Int
+
+  rol          Rol           @relation(fields: [rolId], references: [id], onDelete: Restrict)
+  candidato    Candidato?
+  organizacion Organizacion?
+}
+
+model Rol {
+  id          Int      @id @default(autoincrement())
+  nombre      String   @unique @db.VarChar(40)
+  descripcion String?  @db.VarChar(150)
+  createdAt   DateTime @default(now())
+
+  usuarios Usuario[]
+  permisos RolPermiso[]
+}
+
+model Permiso {
+  id          Int     @id @default(autoincrement())
+  codigo      String  @unique @db.VarChar(100)
+  descripcion String? @db.VarChar(150)
+
+  roles RolPermiso[]
+}
+
+model RolPermiso {
+  rolId     Int
+  permisoId Int
+
+  rol     Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
+  permiso Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([rolId, permisoId])
+}
+
+model Candidato {
+  id        Int      @id @default(autoincrement())
+  usuarioId Int      @unique
+  nombres   String   @db.VarChar(100)
+  apellidos String   @db.VarChar(100)
+  createdAt DateTime @default(now())
+
+  usuario       Usuario      @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  postulaciones Aplicacion[]
+}
+
+model Organizacion {
+  id        Int      @id @default(autoincrement())
+  usuarioId Int      @unique
+  nombre    String   @db.VarChar(160)
+  createdAt DateTime @default(now())
+
+  usuario Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  ofertas Oferta[]
+}
+
+model Categoria {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @unique @db.VarChar(60)
+  createdAt DateTime @default(now())
+
+  ofertas Oferta[]
+}
+
+model Oferta {
+  id             Int          @id @default(autoincrement())
+  organizacionId Int
+  categoriaId    Int
+  titulo         String       @db.VarChar(120)
+  descripcion    String       @db.VarChar(2000)
+  modalidad      Modalidad
+  ubicacion      String       @db.VarChar(160)
+  vacantes       Int
+  fechaLimite    DateTime     @db.Date
+  estado         EstadoOferta @default(ABIERTA)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organizacion  Organizacion @relation(fields: [organizacionId], references: [id], onDelete: Restrict)
+  categoria     Categoria    @relation(fields: [categoriaId], references: [id], onDelete: Restrict)
+  postulaciones Aplicacion[]
+
+  @@index([estado, fechaLimite])
+  @@index([organizacionId, createdAt])
+  @@index([categoriaId, estado])
+}
+
+model Aplicacion {
+  id               Int               @id @default(autoincrement())
+  candidatoId      Int
+  ofertaId         Int
+  estado           EstadoPostulacion @default(ENVIADA)
+  fechaPostulacion DateTime          @default(now())
+
+  candidato Candidato @relation(fields: [candidatoId], references: [id], onDelete: Restrict)
+  oferta    Oferta    @relation(fields: [ofertaId], references: [id], onDelete: Restrict)
+
+  @@unique([candidatoId, ofertaId])
+  @@index([ofertaId, estado])
+  @@index([candidatoId, fechaPostulacion])
+}
+
+enum Modalidad {
+  PRESENCIAL
+  HIBRIDA
+  VIRTUAL
+}
+
+enum EstadoOferta {
+  ABIERTA
+  CERRADA
+}
+
+enum EstadoPostulacion {
+  ENVIADA
+  EN_REVISION
+  SELECCIONADA
+  ACEPTADA
+  NO_SELECCIONADA
+  RECHAZO_LA_OFERTA
+  RETIRADA
+}
