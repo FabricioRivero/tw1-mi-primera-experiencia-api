@@ -1,110 +1,290 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
-import { Oferta } from './interfaces/oferta.interface';
-import { CrearOfertaDto } from './dto/crear-oferta.dto';
-import { ReemplazarOfertaDto } from './dto/reemplazar-oferta.dto';
-import { ActualizarOfertaDto } from './dto/actualizar-oferta.dto';
-import { FiltrarOfertasDto } from './dto/filtrar-ofertas.dto';
-import { EmpresasService } from '../empresas/empresas.service';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from '../database/prisma.service.js';
+import { ActualizarOfertaDto, CrearOfertaDto } from './dto/crear-oferta.dto.js';
+import { ListarOfertasDto } from './dto/listar-ofertas.dto.js';
+
+function inicioDelDiaUtc(): Date {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  return today;
+}
 
 @Injectable()
 export class OfertasService {
-  private readonly ruta = path.resolve(process.cwd(), 'data', 'ofertas.json');
+  constructor(private readonly prisma: PrismaService) {}
 
-  // Inyección de dependencias: Nest nos entrega la instancia de EmpresasService
-  constructor(private readonly empresasService: EmpresasService) {}
-
-  // ---------- Persistencia (archivo JSON) ----------
-
-  private leer(): Oferta[] {
-    if (!fs.existsSync(this.ruta)) return [];
-    return JSON.parse(fs.readFileSync(this.ruta, 'utf-8')) as Oferta[];
-  }
-
-  private guardar(ofertas: Oferta[]): void {
-    fs.writeFileSync(this.ruta, JSON.stringify(ofertas, null, 2), 'utf-8');
-  }
-
-  private buscarIndice(ofertas: Oferta[], id: string): number {
-    const indice = ofertas.findIndex((o) => o.id === id);
-    if (indice === -1) {
-      throw new NotFoundException(`No existe la oferta con id ${id}`);
-    }
-    return indice;
-  }
-
-  // ---------- CRUD ----------
-
-  create(dto: CrearOfertaDto): Oferta {
-    // Si la empresa no existe, findOne lanza 404 y aquí se corta todo
-    this.empresasService.findOne(dto.empresaId);
-
-    const ofertas = this.leer();
-    const nueva: Oferta = {
-      id: randomUUID(),
-      ...dto,
-      activa: dto.activa ?? true,
-      fechaPublicacion: new Date().toISOString(),
+  async listarPublicas(query: ListarOfertasDto) {
+    const where = {
+      estado: 'ABIERTA' as const,
+      fechaLimite: { gte: inicioDelDiaUtc() },
+      ...(query.categoriaId ? { categoriaId: query.categoriaId } : {}),
+      ...(query.q
+        ? {
+            OR: [
+              { titulo: { contains: query.q, mode: 'insensitive' as const } },
+              {
+                descripcion: {
+                  contains: query.q,
+                  mode: 'insensitive' as const,
+                },
+              },
+            ],
+          }
+        : {}),
     };
-    ofertas.push(nueva);
-    this.guardar(ofertas);
-    return nueva;
-  }
-
-  findAll(filtros: FiltrarOfertasDto): Oferta[] {
-    let ofertas = this.leer();
-
-    if (filtros.tipo) {
-      ofertas = ofertas.filter((o) => o.tipo === filtros.tipo);
-    }
-    if (filtros.modalidad) {
-      ofertas = ofertas.filter((o) => o.modalidad === filtros.modalidad);
-    }
-    if (filtros.area) {
-      const area = filtros.area.toLowerCase();
-      ofertas = ofertas.filter((o) => o.area.toLowerCase().includes(area));
-    }
-    return ofertas;
-  }
-
-  findOne(id: string): Oferta {
-    const ofertas = this.leer();
-    return ofertas[this.buscarIndice(ofertas, id)];
-  }
-
-  // PUT: reemplaza todo; se conservan id y fechaPublicacion
-  replace(id: string, dto: ReemplazarOfertaDto): Oferta {
-    const ofertas = this.leer();
-    const indice = this.buscarIndice(ofertas, id);
-    this.empresasService.findOne(dto.empresaId);
-
-    ofertas[indice] = {
-      id,
-      ...dto,
-      activa: dto.activa ?? true,
-      fechaPublicacion: ofertas[indice].fechaPublicacion,
+    const [offers, total] = await this.prisma.$transaction([
+      this.prisma.oferta.findMany({
+        where,
+        include: {
+          categoria: { select: { nombre: true } },
+          organizacion: { select: { id: true, nombre: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.size,
+        take: query.size,
+      }),
+      this.prisma.oferta.count({ where }),
+    ]);
+    return {
+      items: offers.map((offer) => this.serializarOferta(offer)),
+      page: query.page,
+      size: query.size,
+      total,
+      totalPages: Math.ceil(total / query.size),
     };
-    this.guardar(ofertas);
-    return ofertas[indice];
   }
 
-  // PATCH: solo los campos enviados
-  update(id: string, dto: ActualizarOfertaDto): Oferta {
-    const ofertas = this.leer();
-    const indice = this.buscarIndice(ofertas, id);
-    if (dto.empresaId) this.empresasService.findOne(dto.empresaId);
-
-    ofertas[indice] = { ...ofertas[indice], ...dto };
-    this.guardar(ofertas);
-    return ofertas[indice];
+  async obtenerPublica(id: number) {
+    const offer = await this.prisma.oferta.findFirst({
+      where: {
+        id,
+        estado: 'ABIERTA',
+        fechaLimite: { gte: inicioDelDiaUtc() },
+      },
+      include: {
+        categoria: { select: { nombre: true } },
+        organizacion: { select: { id: true, nombre: true } },
+      },
+    });
+    if (!offer) {
+      throw new NotFoundException(
+        'La oferta no existe o ya no está disponible.',
+      );
+    }
+    return this.serializarOferta(offer);
   }
 
-  remove(id: string): void {
-    const ofertas = this.leer();
-    const indice = this.buscarIndice(ofertas, id);
-    ofertas.splice(indice, 1);
-    this.guardar(ofertas);
+  async listarPropias(usuarioId: number) {
+    const organization = await this.obtenerOrganizacion(usuarioId);
+    const offers = await this.prisma.oferta.findMany({
+      where: { organizacionId: organization.id },
+      include: {
+        categoria: { select: { nombre: true } },
+        organizacion: { select: { id: true, nombre: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return offers.map((offer) => this.serializarOferta(offer));
+  }
+
+  async crear(usuarioId: number, dto: CrearOfertaDto) {
+    const organization = await this.obtenerOrganizacion(usuarioId);
+    this.validarFechaLimite(dto.fechaLimite);
+    await this.validarCategoria(dto.categoriaId);
+    const offer = await this.prisma.oferta.create({
+      data: {
+        titulo: dto.titulo.trim(),
+        descripcion: dto.descripcion.trim(),
+        categoriaId: dto.categoriaId,
+        modalidad: dto.modalidad,
+        ubicacion: dto.ubicacion.trim(),
+        vacantes: dto.vacantes,
+        fechaLimite: new Date(dto.fechaLimite),
+        organizacionId: organization.id,
+      },
+      include: {
+        categoria: { select: { nombre: true } },
+        organizacion: { select: { id: true, nombre: true } },
+      },
+    });
+    return this.serializarOferta(offer);
+  }
+
+  async actualizar(usuarioId: number, id: number, dto: ActualizarOfertaDto) {
+    if (!Object.values(dto).some((value) => value !== undefined)) {
+      throw new BadRequestException('Envía al menos un campo para actualizar.');
+    }
+    if (dto.fechaLimite !== undefined) this.validarFechaLimite(dto.fechaLimite);
+    if (dto.categoriaId !== undefined) {
+      await this.validarCategoria(dto.categoriaId);
+    }
+    const organization = await this.obtenerOrganizacion(usuarioId);
+    try {
+      return await this.prisma.$transaction(
+        async (transaction) => {
+          const offer = await transaction.oferta.findFirst({
+            where: { id, organizacionId: organization.id },
+          });
+          if (!offer) {
+            throw new NotFoundException(
+              'La oferta no existe o no pertenece a esta organización.',
+            );
+          }
+          if (offer.estado === 'CERRADA') {
+            throw new ConflictException(
+              'Una oferta cerrada no se puede volver a editar ni abrir.',
+            );
+          }
+          if (dto.vacantes !== undefined) {
+            const selectedCount = await transaction.aplicacion.count({
+              where: {
+                ofertaId: offer.id,
+                estado: { in: ['SELECCIONADA', 'ACEPTADA'] },
+              },
+            });
+            if (dto.vacantes < selectedCount) {
+              throw new ConflictException(
+                'Las vacantes no pueden ser menores que las postulaciones seleccionadas o aceptadas.',
+              );
+            }
+          }
+
+          const updated = await transaction.oferta.update({
+            where: { id },
+            data: {
+              ...(dto.titulo !== undefined
+                ? { titulo: dto.titulo.trim() }
+                : {}),
+              ...(dto.descripcion !== undefined
+                ? { descripcion: dto.descripcion.trim() }
+                : {}),
+              ...(dto.categoriaId !== undefined
+                ? { categoriaId: dto.categoriaId }
+                : {}),
+              ...(dto.modalidad !== undefined
+                ? { modalidad: dto.modalidad }
+                : {}),
+              ...(dto.ubicacion !== undefined
+                ? { ubicacion: dto.ubicacion.trim() }
+                : {}),
+              ...(dto.vacantes !== undefined ? { vacantes: dto.vacantes } : {}),
+              ...(dto.fechaLimite !== undefined
+                ? { fechaLimite: new Date(dto.fechaLimite) }
+                : {}),
+              ...(dto.estado !== undefined ? { estado: dto.estado } : {}),
+            },
+            include: {
+              categoria: { select: { nombre: true } },
+              organizacion: { select: { id: true, nombre: true } },
+            },
+          });
+          return this.serializarOferta(updated);
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (error: unknown) {
+      if (this.isPrismaCode(error, 'P2034')) {
+        throw new ConflictException(
+          'La oferta o sus postulaciones cambiaron en paralelo; vuelve a consultar e intenta otra vez.',
+        );
+      }
+      if (this.isPrismaCode(error, 'P2003')) {
+        throw new BadRequestException('La categoría indicada ya no existe.');
+      }
+      throw error;
+    }
+  }
+
+  async eliminar(usuarioId: number, id: number) {
+    const offer = await this.obtenerPropia(usuarioId, id);
+    const applications = await this.prisma.aplicacion.count({
+      where: { ofertaId: offer.id },
+    });
+    if (applications > 0) {
+      throw new ConflictException(
+        'No se puede eliminar una oferta que ya tiene postulaciones.',
+      );
+    }
+    try {
+      const deleted = await this.prisma.oferta.delete({
+        where: { id: offer.id },
+      });
+      return { mensaje: 'Oferta eliminada.', id: deleted.id };
+    } catch (error: unknown) {
+      if (this.isPrismaCode(error, 'P2003')) {
+        throw new ConflictException(
+          'No se puede eliminar una oferta que ya tiene postulaciones.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async obtenerOrganizacion(usuarioId: number) {
+    const organization = await this.prisma.organizacion.findUnique({
+      where: { usuarioId },
+    });
+    if (!organization) {
+      throw new NotFoundException('No se encontró el perfil de organización.');
+    }
+    return organization;
+  }
+
+  private async obtenerPropia(usuarioId: number, id: number) {
+    const offer = await this.prisma.oferta.findFirst({
+      where: { id, organizacion: { usuarioId } },
+    });
+    if (!offer) {
+      throw new NotFoundException(
+        'La oferta no existe o no pertenece a esta organización.',
+      );
+    }
+    return offer;
+  }
+
+  private async validarCategoria(categoriaId: number): Promise<void> {
+    const category = await this.prisma.categoria.findUnique({
+      where: { id: categoriaId },
+      select: { id: true },
+    });
+    if (!category) throw new BadRequestException('La categoría no existe.');
+  }
+
+  private validarFechaLimite(value: string): void {
+    const deadline = new Date(value);
+    if (Number.isNaN(deadline.getTime()) || deadline < inicioDelDiaUtc()) {
+      throw new BadRequestException(
+        'La fecha límite debe ser hoy o una fecha posterior.',
+      );
+    }
+  }
+
+  private serializarOferta<
+    T extends {
+      categoria: { nombre: string };
+      organizacion: { id: number; nombre: string };
+    },
+  >(offer: T) {
+    const { categoria, organizacion, ...fields } = offer;
+    return {
+      ...fields,
+      categoria: categoria.nombre,
+      organizacionId: organizacion.id,
+      organizacion: organizacion.nombre,
+    };
+  }
+
+  private isPrismaCode(error: unknown, code: string): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === code
+    );
   }
 }

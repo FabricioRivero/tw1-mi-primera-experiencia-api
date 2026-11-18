@@ -1,12 +1,10 @@
 import { Module } from '@nestjs/common';
-import { OfertasService } from './ofertas.service';
-import { OfertasController } from './ofertas.controller';
-import { EmpresasModule } from '../empresas/empresas.module';
+import { OfertasController } from './ofertas.controller.js';
+import { OfertasService } from './ofertas.service.js';
 
 @Module({
-  imports: [EmpresasModule], // trae EmpresasService (porque EmpresasModule lo exporta)
   controllers: [OfertasController],
   providers: [OfertasService],
-  exports: [OfertasService], // para que PostulacionesModule (Jorge) lo use
+  exports: [OfertasService],
 })
 export class OfertasModule {}

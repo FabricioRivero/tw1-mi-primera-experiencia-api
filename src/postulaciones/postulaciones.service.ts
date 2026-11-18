@@ -3,172 +3,348 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import { Postulacion } from './interfaces/postulacion.interface.js';
-import { CrearPostulacionDto } from './dto/crear-postulacion.dto.js';
-import { ActualizarPostulacionDto } from './dto/actualizar-postulacion.dto.js';
-import { ReemplazarPostulacionDto } from './dto/reemplazar-postulacion.dto.js';
-import { EstadoPostulacion } from './enums/estado-postulacion.enum.js';
-import { Estudiante } from '../estudiantes/interfaces/estudiante.interface.js';
+import { PrismaService } from '../database/prisma.service.js';
+import { CambiarEstadoDto } from './dto/cambiar-estado.dto.js';
+import { ResponderSeleccionDto } from './dto/responder-seleccion.dto.js';
+
+function inicioDelDiaUtc(): Date {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  return today;
+}
 
 @Injectable()
 export class PostulacionesService {
-  private readonly ruta = path.resolve(
-    process.cwd(),
-    'data',
-    'postulaciones.json',
-  );
-  private readonly rutaEstudiantes = path.resolve(
-    process.cwd(),
-    'data',
-    'estudiantes.json',
-  );
+  constructor(private readonly prisma: PrismaService) {}
 
-  private asegurarArchivo(ruta: string): void {
-    const dir = path.dirname(ruta);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+  async crear(usuarioId: number, ofertaId: number) {
+    const candidato = await this.obtenerCandidato(usuarioId);
+    try {
+      return await this.prisma.$transaction(
+        async (transaction) => {
+          const offer = await transaction.oferta.findFirst({
+            where: {
+              id: ofertaId,
+              estado: 'ABIERTA',
+              fechaLimite: { gte: inicioDelDiaUtc() },
+            },
+          });
+          if (!offer) {
+            throw new NotFoundException(
+              'La oferta no existe, está cerrada o venció.',
+            );
+          }
+          const application = await transaction.aplicacion.create({
+            data: { candidatoId: candidato.id, ofertaId: offer.id },
+            include: {
+              oferta: {
+                select: {
+                  id: true,
+                  titulo: true,
+                  organizacion: { select: { nombre: true } },
+                },
+              },
+            },
+          });
+          return this.serializar(application);
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (error: unknown) {
+      if (this.isPrismaCode(error, 'P2002')) {
+        throw new ConflictException(
+          'Ya existe una postulación histórica para este candidato y esta oferta.',
+        );
+      }
+      if (this.isPrismaCode(error, 'P2034')) {
+        throw new ConflictException(
+          'La oferta cambió en paralelo; vuelve a consultarla e intenta otra vez.',
+        );
+      }
+      throw error;
     }
-    if (!fs.existsSync(ruta)) {
-      fs.writeFileSync(ruta, '[]', 'utf-8');
-    }
   }
 
-  private leer(): Postulacion[] {
-    this.asegurarArchivo(this.ruta);
-    const contenido = fs.readFileSync(this.ruta, 'utf-8');
-    return JSON.parse(contenido) as Postulacion[];
+  async listarMias(usuarioId: number) {
+    const candidate = await this.obtenerCandidato(usuarioId);
+    const applications = await this.prisma.aplicacion.findMany({
+      where: { candidatoId: candidate.id },
+      include: {
+        oferta: {
+          select: {
+            id: true,
+            titulo: true,
+            organizacion: { select: { nombre: true } },
+          },
+        },
+      },
+      orderBy: { fechaPostulacion: 'desc' },
+    });
+    return applications.map((application) => this.serializar(application));
   }
 
-  private guardar(datos: Postulacion[]): void {
-    this.asegurarArchivo(this.ruta);
-    fs.writeFileSync(this.ruta, JSON.stringify(datos, null, 2), 'utf-8');
-  }
-
-  private leerEstudiantes(): Estudiante[] {
-    this.asegurarArchivo(this.rutaEstudiantes);
-    const contenido = fs.readFileSync(this.rutaEstudiantes, 'utf-8');
-    return JSON.parse(contenido) as Estudiante[];
-  }
-
-  private buscarIndice(id: string): number {
-    const postulaciones = this.leer();
-    const indice = postulaciones.findIndex((item) => item.id === id);
-    if (indice === -1) {
-      throw new NotFoundException(`No existe una postulación con id ${id}`);
-    }
-    return indice;
-  }
-
-  private verificarEstudianteExiste(idEstudiante: string): void {
-    const estudiantes = this.leerEstudiantes();
-    const existe = estudiantes.some((item) => item.id === idEstudiante);
-    if (!existe) {
+  async listarPorOferta(usuarioId: number, ofertaId: number) {
+    const organization = await this.obtenerOrganizacion(usuarioId);
+    const offer = await this.prisma.oferta.findFirst({
+      where: { id: ofertaId, organizacionId: organization.id },
+      select: { id: true },
+    });
+    if (!offer) {
       throw new NotFoundException(
-        `No existe un estudiante con id ${idEstudiante}`,
+        'La oferta no existe o no pertenece a esta organización.',
       );
     }
-  }
-
-  obtenerTodos(): Postulacion[] {
-    return this.leer();
-  }
-
-  obtenerPorId(id: string): Postulacion {
-    const postulacion = this.leer().find((item) => item.id === id);
-    if (!postulacion) {
-      throw new NotFoundException(`No existe una postulación con id ${id}`);
-    }
-    return postulacion;
-  }
-
-  obtenerPorEstudiante(idEstudiante: string): Postulacion[] {
-    this.verificarEstudianteExiste(idEstudiante);
-    return this.leer().filter((item) => item.idEstudiante === idEstudiante);
-  }
-
-  crear(datos: CrearPostulacionDto): Postulacion {
-    this.verificarEstudianteExiste(datos.idEstudiante);
-
-    const postulaciones = this.leer();
-
-    const yaPostulo = postulaciones.some(
-      (item) =>
-        item.idEstudiante === datos.idEstudiante &&
-        item.idOferta === datos.idOferta,
+    const applications = await this.prisma.aplicacion.findMany({
+      where: { ofertaId: offer.id },
+      include: {
+        candidato: {
+          select: { id: true, nombres: true, apellidos: true },
+        },
+        oferta: {
+          select: {
+            id: true,
+            titulo: true,
+            organizacion: { select: { nombre: true } },
+          },
+        },
+      },
+      orderBy: { fechaPostulacion: 'asc' },
+    });
+    return applications.map((application) =>
+      this.serializar(application, true),
     );
-
-    if (yaPostulo) {
-      throw new ConflictException(
-        'El estudiante ya postuló a esta oferta',
-      );
-    }
-
-    const nuevaPostulacion: Postulacion = {
-      id: uuidv4(),
-      idEstudiante: datos.idEstudiante,
-      idOferta: datos.idOferta,
-      fechaPostulacion: new Date().toISOString(),
-      estado: EstadoPostulacion.PENDIENTE,
-    };
-
-    postulaciones.push(nuevaPostulacion);
-    this.guardar(postulaciones);
-    return nuevaPostulacion;
   }
 
-  reemplazar(id: string, datos: ReemplazarPostulacionDto): Postulacion {
-    this.verificarEstudianteExiste(datos.idEstudiante);
+  async cambiarEstado(
+    usuarioId: number,
+    postulacionId: number,
+    dto: CambiarEstadoDto,
+  ) {
+    const organization = await this.obtenerOrganizacion(usuarioId);
+    try {
+      return await this.prisma.$transaction(
+        async (transaction) => {
+          const current = await transaction.aplicacion.findFirst({
+            where: {
+              id: postulacionId,
+              oferta: { organizacionId: organization.id },
+            },
+            include: { oferta: true },
+          });
+          if (!current) {
+            throw new NotFoundException(
+              'La postulación no existe o no pertenece a esta organización.',
+            );
+          }
+          const allowed =
+            (current.estado === 'ENVIADA' &&
+              ['EN_REVISION', 'NO_SELECCIONADA'].includes(dto.estado)) ||
+            (current.estado === 'EN_REVISION' &&
+              ['SELECCIONADA', 'NO_SELECCIONADA'].includes(dto.estado));
+          if (!allowed) {
+            throw new ConflictException(
+              `No se puede cambiar de ${current.estado} a ${dto.estado}.`,
+            );
+          }
 
-    const postulaciones = this.leer();
-    const indice = this.buscarIndice(id);
+          if (dto.estado === 'SELECCIONADA') {
+            const selectedCount = await transaction.aplicacion.count({
+              where: {
+                ofertaId: current.ofertaId,
+                estado: { in: ['SELECCIONADA', 'ACEPTADA'] },
+              },
+            });
+            if (selectedCount >= current.oferta.vacantes) {
+              throw new ConflictException(
+                'La oferta ya alcanzó el número de vacantes seleccionadas.',
+              );
+            }
+          }
 
-    const duplicado = postulaciones.some(
-      (item) =>
-        item.id !== id &&
-        item.idEstudiante === datos.idEstudiante &&
-        item.idOferta === datos.idOferta,
+          const updated = await transaction.aplicacion.update({
+            where: { id: current.id },
+            data: { estado: dto.estado },
+            include: {
+              candidato: {
+                select: { id: true, nombres: true, apellidos: true },
+              },
+              oferta: {
+                select: {
+                  id: true,
+                  titulo: true,
+                  organizacion: { select: { nombre: true } },
+                },
+              },
+            },
+          });
+          return this.serializar(updated, true);
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (error: unknown) {
+      if (this.isPrismaCode(error, 'P2034')) {
+        throw new ConflictException(
+          'La postulación cambió en paralelo; vuelve a consultar e intenta otra vez.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async responderSeleccion(
+    usuarioId: number,
+    postulacionId: number,
+    dto: ResponderSeleccionDto,
+  ) {
+    const candidate = await this.obtenerCandidato(usuarioId);
+    const application = await this.prisma.aplicacion.findFirst({
+      where: { id: postulacionId, candidatoId: candidate.id },
+    });
+    if (!application) {
+      throw new NotFoundException(
+        'No existe una postulación propia con ese ID.',
+      );
+    }
+    if (application.estado !== 'SELECCIONADA') {
+      throw new ConflictException(
+        'Solo puedes responder una postulación que esté SELECCIONADA.',
+      );
+    }
+    const changed = await this.prisma.aplicacion.updateMany({
+      where: {
+        id: application.id,
+        candidatoId: candidate.id,
+        estado: 'SELECCIONADA',
+      },
+      data: { estado: dto.respuesta },
+    });
+    if (changed.count !== 1) {
+      throw new ConflictException(
+        'La postulación ya recibió una respuesta; vuelve a consultar su estado.',
+      );
+    }
+    const updated = await this.prisma.aplicacion.findUniqueOrThrow({
+      where: { id: application.id },
+      include: {
+        oferta: {
+          select: {
+            id: true,
+            titulo: true,
+            organizacion: { select: { nombre: true } },
+          },
+        },
+      },
+    });
+    return this.serializar(updated);
+  }
+
+  async retirar(usuarioId: number, postulacionId: number) {
+    const candidate = await this.obtenerCandidato(usuarioId);
+    const application = await this.prisma.aplicacion.findFirst({
+      where: { id: postulacionId, candidatoId: candidate.id },
+    });
+    if (!application) {
+      throw new NotFoundException(
+        'No existe una postulación propia con ese ID.',
+      );
+    }
+    if (!['ENVIADA', 'EN_REVISION'].includes(application.estado)) {
+      throw new ConflictException(
+        `No se puede retirar una postulación en estado ${application.estado}.`,
+      );
+    }
+    const changed = await this.prisma.aplicacion.updateMany({
+      where: {
+        id: application.id,
+        candidatoId: candidate.id,
+        estado: { in: ['ENVIADA', 'EN_REVISION'] },
+      },
+      data: { estado: 'RETIRADA' },
+    });
+    if (changed.count !== 1) {
+      throw new ConflictException(
+        'La postulación cambió de estado; vuelve a consultar e intenta otra vez.',
+      );
+    }
+    const updated = await this.prisma.aplicacion.findUniqueOrThrow({
+      where: { id: application.id },
+      include: {
+        oferta: {
+          select: {
+            id: true,
+            titulo: true,
+            organizacion: { select: { nombre: true } },
+          },
+        },
+      },
+    });
+    return this.serializar(updated);
+  }
+
+  private async obtenerCandidato(usuarioId: number) {
+    const candidate = await this.prisma.candidato.findUnique({
+      where: { usuarioId },
+    });
+    if (!candidate) {
+      throw new NotFoundException('No se encontró el perfil de candidato.');
+    }
+    return candidate;
+  }
+
+  private async obtenerOrganizacion(usuarioId: number) {
+    const organization = await this.prisma.organizacion.findUnique({
+      where: { usuarioId },
+    });
+    if (!organization) {
+      throw new NotFoundException('No se encontró el perfil de organización.');
+    }
+    return organization;
+  }
+
+  private serializar<
+    T extends {
+      id: number;
+      candidatoId: number;
+      ofertaId: number;
+      estado: string;
+      fechaPostulacion: Date;
+      oferta: {
+        id: number;
+        titulo: string;
+        organizacion: { nombre: string };
+      };
+      candidato?: { id: number; nombres: string; apellidos: string };
+    },
+  >(application: T, includeCandidate = false) {
+    return {
+      id: application.id,
+      ofertaId: application.ofertaId,
+      candidatoId: application.candidatoId,
+      estado: application.estado,
+      fechaPostulacion: application.fechaPostulacion,
+      oferta: {
+        id: application.oferta.id,
+        titulo: application.oferta.titulo,
+        organizacion: application.oferta.organizacion.nombre,
+      },
+      ...(includeCandidate && application.candidato
+        ? {
+            candidato: {
+              id: application.candidato.id,
+              nombres: application.candidato.nombres,
+              apellidos: application.candidato.apellidos,
+            },
+          }
+        : {}),
+    };
+  }
+
+  private isPrismaCode(error: unknown, code: string): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === code
     );
-
-    if (duplicado) {
-      throw new ConflictException(
-        'El estudiante ya postuló a esta oferta',
-      );
-    }
-
-    const postulacionReemplazada: Postulacion = {
-      id,
-      idEstudiante: datos.idEstudiante,
-      idOferta: datos.idOferta,
-      fechaPostulacion: postulaciones[indice].fechaPostulacion,
-      estado: datos.estado,
-    };
-
-    postulaciones[indice] = postulacionReemplazada;
-    this.guardar(postulaciones);
-    return postulacionReemplazada;
-  }
-
-  actualizar(id: string, datos: ActualizarPostulacionDto): Postulacion {
-    const postulaciones = this.leer();
-    const indice = this.buscarIndice(id);
-
-    postulaciones[indice] = {
-      ...postulaciones[indice],
-      estado: datos.estado,
-    };
-
-    this.guardar(postulaciones);
-    return postulaciones[indice];
-  }
-
-  eliminar(id: string): Postulacion {
-    const postulaciones = this.leer();
-    const indice = this.buscarIndice(id);
-    const [postulacionEliminada] = postulaciones.splice(indice, 1);
-    this.guardar(postulaciones);
-    return postulacionEliminada;
   }
 }
